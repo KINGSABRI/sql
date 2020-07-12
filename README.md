@@ -2,6 +2,24 @@
 
 a console-based tool to connect to MSSQL server for red teamer and pentesters
 
+## Features
+- Acts as SQL UI, sends raw SQL query to MSSQL server
+- Enumerates MSSQL server information 
+- Enumerates current user information
+- Enumerates logged-in users
+- Enumerates database admins 
+- Enumerates connected servers (Enumerates)
+- Enumerates exist databases
+- Enumerates databases tables and columns 
+- Enables and/or disables `xp_cmdshell` 
+- Executes system commands
+- Crawls database links
+- Command autocomplete 
+- Easy to add new commands
+- verbose mode prints background SQL queries
+- debug mode prints ruby hashes from SQL queries result
+
+
 ## Requirements
 ```
 gem install sequel terminal-table pry
