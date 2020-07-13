@@ -1,6 +1,6 @@
 # sql
 
-a console-based tool to connect to MSSQL server for red teamer and pentesters
+a console-based tool to connect to MSSQL server (loaded with pre-built queries) for red teamer and pentesters
 
 ## Features
 - Acts as SQL UI, sends raw SQL query to MSSQL server
@@ -8,7 +8,7 @@ a console-based tool to connect to MSSQL server for red teamer and pentesters
 - Enumerates current user information
 - Enumerates logged-in users
 - Enumerates database admins 
-- Enumerates connected servers (Enumerates)
+- Enumerates connected servers
 - Enumerates exist databases
 - Enumerates databases tables and columns 
 - Enables and/or disables `xp_cmdshell` 
