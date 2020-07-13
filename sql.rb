@@ -101,7 +101,7 @@ on      perm.grantee_principal_id = princ.principal_id
     puts "[+] ".green.bold + "Service details"
     cmd_query('SELECT servicename,service_account,startup_type_desc,filename FROM sys.dm_server_services')
     puts "[+] ".green.bold + "xp_cmdshell config:"
-    cmd_query('SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = "xp_cmdshell" OR name = "show advanced options";')
+    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'xp_cmdshell' OR name = 'show advanced options'")
     puts "[♠] ".cyan + "you can use 'enable-xpshell' and 'disable-xpcmdshell' to change the values.".dark_cyan
     puts "[+] ".green.bold + "Current user"
     cmd_query("SELECT SYSTEM_USER as 'Current User'")
