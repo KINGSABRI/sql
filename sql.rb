@@ -110,7 +110,6 @@ on      perm.grantee_principal_id = princ.principal_id
     puts 
   end
 
-
   def cmd_links(var=nil)
     links = cmd_query("SELECT srvname FROM master..sysservers WHERE srvname!=@@servername AND srvproduct = 'SQL Server'")
     if !links.empty?
@@ -182,12 +181,22 @@ on      perm.grantee_principal_id = princ.principal_id
     cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'xp_cmdshell' OR name = 'show advanced options';")
   end
 
-  def enable_ole_authomation
+  def enable_ole_automation
     _print = @verbose =~ /true/i? true : false
     puts "[+] ".green + "Current configurations:" if _print
     cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'") if _print
     puts "[+] ".green + "Enabling Ole Automation Procedures"
     cmd_query("EXEC('sp_configure ''show advanced options'', 1; reconfigure;');EXEC('sp_configure ''Ole Automation Procedures'', 1; reconfigure;')", _print)
+    puts "[+] ".green + "Modified configurations:" if _print
+    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'") if _print
+  end
+
+  def disable_ole_automation
+    _print = @verbose =~ /true/i? true : false
+    puts "[+] ".green + "Current configurations:" if _print
+    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'") if _print
+    puts "[+] ".green + "Disabling Ole Automation Procedures"
+    cmd_query("EXEC('sp_configure ''Ole Automation Procedures'', 0; reconfigure;');EXEC('sp_configure ''show advanced options'', 0; reconfigure;')", _print)
     puts "[+] ".green + "Modified configurations:" if _print
     cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'") if _print
   end
@@ -245,6 +254,19 @@ on      perm.grantee_principal_id = princ.principal_id
     puts bulkcontent.to_s
   end
 
+  def cmd_mkdir(dir)
+    if dir.nil? || dir.empty?
+      puts "[!] ".yellow + "No directory/folder name was provided to create (full path recommended)."
+      return 
+    end
+    cmd_query("EXEC master.dbo.xp_create_subdir '#{dir}'")
+  end
+
+  # TBD
+  def cmd_rm_rf(file)
+    "rmdir C:\\db911 /S /Q"
+  end
+
   def cmd_exec(cmd)
     if cmd.nil? || cmd.empty?
       puts "[!] ".yellow + "No command was provided"
@@ -300,6 +322,7 @@ on      perm.grantee_principal_id = princ.principal_id
     puts "columns".ljust(20," ")              + "columns <Table_Name> - list columns from table."
     puts "exec".ljust(20," ")                 + "exec <CMD> - Execute Windows commands using xp_cmdshell."
     puts "cat".ljust(20," ")                  + "cat <FILE> - Read file from disk. (full path must given)"
+    puts "mdkri".ljust(20," ")                + "mkdir <DIR> - Create directories and subdirectories (acts like mkdir -p). (full path must given)"
     puts "enable-xpcmdshell".ljust(20," ")    + "enable-xpcmdshell - enable xp_cmdshell on MSSQL."
     puts "disable-xpcmdshell".ljust(20," ")   + "disable-xpcmdshell - disable xp_cmdshell on MSSQL."
     puts "links".ljust(20," ")                + "links - crawl MSSQL links."
@@ -434,13 +457,13 @@ begin
   puts @commands.run_command('help')
 
   MAIN = %w[
-    help info dbs tables columns query links query-link exec cat
+    help info dbs tables columns query links query-link exec cat mkdir
     get-xpcmdshell, enable-xpcmdshell disable-xpcmdshell whoami
     logons sessions db-admins enum-users enum-domain-groups
     verbose debug 
     exit
   ].sort
-  comp = proc { |s| MAIN.grep(/^#{Regexp.escape(s)}/) }
+  comp = proc { |s| MAIN.grep(/^#{Regexp.escape(s)}/i) }
   Readline.completion_proc = comp
 
   trap('INT', 'SIG_IGN')
@@ -455,4 +478,3 @@ rescue Sequel::DatabaseConnectionError => e
 rescue Exception => e 
   puts "[x] ".red + e.full_message.to_s
 end
-
