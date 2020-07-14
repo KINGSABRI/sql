@@ -26,6 +26,25 @@ class String
   end
 end
 
+def set_default_console
+  menu = %w[
+    help 
+    info whoami
+    dbs tables columns links 
+    query query-link exec 
+    cat mkdir download upload
+    logons sessions db-admins
+    enum-users enum-domain-groups
+    get-xpcmdshell enable-xpcmdshell disable-xpcmdshell 
+    verbose debug 
+    exit
+  ].sort
+
+  comp = proc { |s| menu.grep(/^#{Regexp.escape(s)}/i) }
+  Readline.completion_proc = comp
+  trap('INT', 'DEFAULT')
+end
+
 
 class Commands
 
@@ -37,8 +56,20 @@ class Commands
     @debug   = 'false'
   end
   
-  def cmd_query(query, print_table=true)
-    puts "[>] #{query}" if @verbose =~ /true/i
+  # @param [String] query
+  #   the query to be sent
+  # @param [Boolean] print_table
+  #   print the query reult in a terminal table. (default true)
+  # @param [Proc] callback
+  #   callback to execute after the method is executed even when exception happens 
+  # 
+  # @example
+  #   query1 = create_procedure
+  #   query2 = ->{delete_procedure} # this must be a Proc, lambda is recomnded 
+  #   cmd_query(query1, {print: true, callback: query2})
+  # 
+  def cmd_query(query, opts = {print: true, callback: ->{}})
+      puts "[>] #{query}" if @verbose =~ /true/i
     records = @db[%Q[#{query}]].all 
     table = Terminal::Table.new do |t|
       records.each do |record|
@@ -46,29 +77,40 @@ class Commands
         t << record.values.map {|r| r.nil?? next : r.to_s.wrap(50)}.flatten 
       end
     end
-    puts table if (print_table && !records.empty?)
-    puts "[♦] ".cyan + "No records found." if (records.empty? && print_table)
+    puts table if (opts[:print] && !records.empty?)
+    puts "[♦] ".cyan + "No records found." if (records.empty? && opts[:print])
     pp query   if @debug =~ /true/i
     pp records if @debug =~ /true/i
     records
   rescue Sequel::DatabaseError => e 
-    puts "[!] ".yellow + e.message 
+    puts "[!] ".yellow + e.message
+    return false
   rescue Exception => e
     puts "[!] ".yellow + "Unhandled exception"
     puts e.full_message
+  ensure
+    if opts[:callback].is_a? Proc
+      opts[:callback].call
+      records
+    else
+      "[!] ".yellow + "Callback must be a proc to call"
+      "    "        + "  the callback has been ignored."
+      records
+    end
   end
 
   def cmd_query_link(var=nil)
     link = query = ""
     link  = Readline.readline("[+] ".cyan + "link hostname -> " ) until !link.empty?
     query = Readline.readline("[+] ".cyan + "query to send -> " ) until !query.empty?
+    set_default_console
     cmd_query("SELECT * FROM OPENQUERY([#{link}], '#{query}')")
   end
 
   def cmd_whoami(var=nil)
     puts "[+] ".green.bold + "Current user"
-    puts cmd_query("SELECT SYSTEM_USER as 'current_user'", false).first[:current_user]
-    user_rule = cmd_query("SELECT is_srvrolemember('sysadmin') as user_rule", false).first
+    puts cmd_query("SELECT SYSTEM_USER as 'current_user'", print: false).first[:current_user]
+    user_rule = cmd_query("SELECT is_srvrolemember('sysadmin') as user_rule", print: false).first
     if user_rule[:user_rule] == 1
       puts "[+] ".green.bold + "is admin? " + "Yes!".green
     else
@@ -90,7 +132,7 @@ left join
 on      perm.grantee_principal_id = princ.principal_id
     ]
 
-    cmd_query query
+    cmd_query(query)
   end
 
   def cmd_info(var='')
@@ -141,7 +183,7 @@ on      perm.grantee_principal_id = princ.principal_id
 
   def cmd_enum_domain_groups(domain=nil)
     if domain.nil? or domain.empty?
-      domain = cmd_query("SELECT DEFAULT_DOMAIN() AS domain", false).first[:domain].to_s
+      domain = cmd_query("SELECT DEFAULT_DOMAIN() AS domain", print: false).first[:domain].to_s
       puts "[!] ".yellow + "No domain is specified (default current domain '#{domain}')"
     end
     puts "[+] ".green.bold + "Enumerate domain groups"
@@ -150,11 +192,11 @@ on      perm.grantee_principal_id = princ.principal_id
 
   def cmd_enum_domain_users(domain=nil)
     if domain.nil? or domain.empty?
-      domain = cmd_query("SELECT DEFAULT_DOMAIN() AS domain", false).first[:domain].to_s
+      domain = cmd_query("SELECT DEFAULT_DOMAIN() AS domain", print: false).first[:domain].to_s
       puts "[!] ".yellow + "No domain is specified (default current domain '#{domain}')"
     end
     puts "[+] ".green.bold + "Enumerate domain groups"
-    groups = cmd_query("EXEC xp_enumgroups #{domain};", false)
+    groups = cmd_query("EXEC xp_enumgroups #{domain};", print: false)
     groups.each do |group|
       group = group[:group]
       suser_sid = cmd_query("SELECT SUSER_SID('#{domain}\\#{group}')")
@@ -184,21 +226,21 @@ on      perm.grantee_principal_id = princ.principal_id
   def enable_ole_automation
     _print = @verbose =~ /true/i? true : false
     puts "[+] ".green + "Current configurations:" if _print
-    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'") if _print
+    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'", {print: _print})
     puts "[+] ".green + "Enabling Ole Automation Procedures"
-    cmd_query("EXEC('sp_configure ''show advanced options'', 1; reconfigure;');EXEC('sp_configure ''Ole Automation Procedures'', 1; reconfigure;')", _print)
+    cmd_query("EXEC('sp_configure ''show advanced options'', 1; reconfigure;');EXEC('sp_configure ''Ole Automation Procedures'', 1; reconfigure;')", {print: _print})
     puts "[+] ".green + "Modified configurations:" if _print
-    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'") if _print
+    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'", {print: _print})
   end
 
   def disable_ole_automation
     _print = @verbose =~ /true/i? true : false
     puts "[+] ".green + "Current configurations:" if _print
-    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'") if _print
+    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'", {print: _print})
     puts "[+] ".green + "Disabling Ole Automation Procedures"
-    cmd_query("EXEC('sp_configure ''Ole Automation Procedures'', 0; reconfigure;');EXEC('sp_configure ''show advanced options'', 0; reconfigure;')", _print)
+    cmd_query("EXEC('sp_configure ''Ole Automation Procedures'', 0; reconfigure;');EXEC('sp_configure ''show advanced options'', 0; reconfigure;')", {print: _print})
     puts "[+] ".green + "Modified configurations:" if _print
-    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'") if _print
+    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'", {print: _print})
   end
 
 
@@ -230,6 +272,11 @@ on      perm.grantee_principal_id = princ.principal_id
     cmd_query("SELECT conn.session_id, host_name, status, program_name, nt_domain, login_name, connect_time, last_request_end_time FROM sys.dm_exec_sessions AS sess JOIN sys.dm_exec_connections AS conn ON sess.session_id = conn.session_id;")
   end
 
+  def cmd_stored_procedures(name=nil)
+    #TBD 
+    # query SELECT name FROM sys.procedures WHERE name LIKE '%read_txt_sp_%'
+  end
+
   # 
   # Resources
   # - https://www.mssqltips.com/sqlservertip/1643/using-openrowset-to-read-large-files-into-sql-server/
@@ -238,28 +285,76 @@ on      perm.grantee_principal_id = princ.principal_id
     if file_path.nil? || file_path.empty?
       puts "[!] ".yellow + "File name missing (full path required)"
       return 
-    end    
+    end
     file = parse_path(file_path)
 
     stored = create_readfile_procedure
+    _ensure = -> {
+      puts "[+] ".green + "Cleaning-up created stored procedure '#{stored[:procedure]}' content"
+      cmd_query("DROP PROCEDURE IF EXISTS #{stored[:procedure]}", print: false) # check if dropped: query IF OBJECT_ID('PROCEDURENAME', 'P') IS NULL SELECT @@servername
+    }
     query = <<~SQLQUERY
       DECLARE @t VARCHAR(MAX) 
       EXEC #{stored[:procedure]} '#{file[:full_path]}', @t output 
       SELECT @t AS [BulkColumn] 
     SQLQUERY
     puts "[+] ".green.bold + "Reading file '#{file_path}' content:"
-    bulkcontent = cmd_query(query, false).first[:bulkcolumn]
-    puts "[+] ".green + "Cleaning-up created stored procedure '#{stored[:procedure]}' content"
-    cmd_query("DROP PROCEDURE IF EXISTS #{stored[:procedure]}", false) # check if dropped: query IF OBJECT_ID('PROCEDURENAME', 'P') IS NULL SELECT @@servername
-    puts bulkcontent.to_s
+    bulkcontent = cmd_query(query, {print: false, callback: _ensure})
+    if bulkcontent
+      puts bulkcontent.first[:bulkcolumn].to_s
+    end
   end
+
+  # https://www.mytecbits.com/microsoft/sql-server/escape-special-characters-using-string_escape
+  # FIXME
+  def cmd_upload(val=nil)
+    src_file = dst_file = ""
+    Readline.completion_append_character = ""
+    Readline.completion_proc = Proc.new do |str|
+      Dir[str+'*'].grep( /^#{Regexp.escape(str)}/ )
+    end
+    src_file = Readline.readline("[+] ".cyan + "src file path -> " ) until !src_file.empty?
+    # dst_file = Readline.readline("[+] ".cyan + "dst file path -> " ) until !dst_file.empty?
+    set_default_console
+
+    src_file = File.absolute_path(src_file)
+    # dst_file = parse_path(dst_file)[:path] + "\\" + File.basename(src_file)
+    puts "[+] ".green.bold + "Reading source file '#{src_file}' content:"
+    require 'base64'
+    blob = File.open(src_file, 'rb').read
+    enable_ole_automation
+    make_sure = -> {disable_ole_automation}
+    query = <<~SQLQUERY
+      SET QUOTED_IDENTIFIER OFF;
+      DECLARE @text nvarchar(128) = '#124 $99^@'
+
+      DECLARE @OLE INT
+      DECLARE @FileID INT
+      EXECUTE sp_OACreate 'Scripting.FileSystemObject', @OLE OUT
+      EXECUTE sp_OAMethod @OLE, 'OpenTextFile', @FileID OUT, 'C:\\Temp\\file2.txt', 8, 1
+      EXECUTE sp_OAMethod @FileID, 'WriteLine', Null, 'test string to write'
+      EXECUTE sp_OADestroy @FileID
+      EXECUTE sp_OADestroy @OLE
+    SQLQUERY
+    # puts "[+] ".green.bold + "Writing the conent to '#{parse_path(dst_file)}':"
+    cmd_query(query, {print: false, callback: make_sure})
+  end
+
+  def cmd_download(file_path=nil)
+    puts "TBD"
+  end
+
+  # def cmd_ls(path='.')
+  #   result = cmd_query("EXEC xp_cmdshell 'dir #{path}'", {print: false})
+  #   puts result.first if result
+  # end
 
   def cmd_mkdir(dir)
     if dir.nil? || dir.empty?
       puts "[!] ".yellow + "No directory/folder name was provided to create (full path recommended)."
       return 
     end
-    cmd_query("EXEC master.dbo.xp_create_subdir '#{dir}'")
+    cmd_query("EXEC master.dbo.xp_create_subdir '#{dir}'", print: false)
   end
 
   # TBD
@@ -322,7 +417,7 @@ on      perm.grantee_principal_id = princ.principal_id
     puts "columns".ljust(20," ")              + "columns <Table_Name> - list columns from table."
     puts "exec".ljust(20," ")                 + "exec <CMD> - Execute Windows commands using xp_cmdshell."
     puts "cat".ljust(20," ")                  + "cat <FILE> - Read file from disk. (full path must given)"
-    puts "mdkri".ljust(20," ")                + "mkdir <DIR> - Create directories and subdirectories (acts like mkdir -p). (full path must given)"
+    puts "mkdir".ljust(20," ")                + "mkdir <DIR> - Create directories and subdirectories (acts like mkdir -p). (full path must given)"
     puts "enable-xpcmdshell".ljust(20," ")    + "enable-xpcmdshell - enable xp_cmdshell on MSSQL."
     puts "disable-xpcmdshell".ljust(20," ")   + "disable-xpcmdshell - disable xp_cmdshell on MSSQL."
     puts "links".ljust(20," ")                + "links - crawl MSSQL links."
@@ -335,11 +430,10 @@ on      perm.grantee_principal_id = princ.principal_id
 
   
   def create_readfile_procedure
-    stored_proc = "ns_txt_file_read"
-    stored_proc = "read_txt_sp_#{('a1'..'z9').to_a.sample(5).join}"
-    puts "[*] ".green + "Creating stored procedure '#{stored_proc}'."
+    procedure_name = "read_txt_sp_#{('a1'..'z9').to_a.sample(5).join}"
+    puts "[*] ".green + "Creating stored procedure '#{procedure_name}'."
     query = <<~RAWSQL
-    CREATE PROC [dbo].[#{stored_proc}]  
+    CREATE PROC [dbo].[#{procedure_name}]  
       @os_file_name NVARCHAR(256) 
       ,@text_file VARCHAR(MAX) OUTPUT  
     AS  
@@ -347,7 +441,7 @@ on      perm.grantee_principal_id = princ.principal_id
             , @parmsdeclare NVARCHAR(4000)
 
     SET NOCOUNT ON
-    SET @sql = 'select @text_file=(select * from openrowset ( 
+    SET @sql = 'SELECT @text_file=(SELECT * from openrowset ( 
                 bulk ''' + @os_file_name + ''' 
                 ,SINGLE_CLOB) x 
                 )' 
@@ -356,8 +450,8 @@ on      perm.grantee_principal_id = princ.principal_id
                               , @params = @parmsdeclare 
                               , @text_file = @text_file OUTPUT 
     RAWSQL
-    query = cmd_query(query, false)
-    {procedure: stored_proc, sp_query: query}
+    query = cmd_query(query, print: false)
+    {procedure: procedure_name, sp_query: query}
   end
 
   def parse_path(path)
@@ -392,13 +486,18 @@ on      perm.grantee_principal_id = princ.principal_id
     
     if self.respond_to?("cmd_#{run}")
       send("cmd_#{run}", args.join(" "))
-    elsif cmd.empty? or cmd.nil?
-      # Do Nothing!
+    # elsif run.strip.empty? or run.nil?
+    #   # Do Nothing!
     else
       cmd_send(cmd.join(" "))
     end
   rescue NoMethodError => e
+    return if run.nil?
     puts "[!] ".yellow + "Unknow command '#{cmd.split.join(' ')}'"
+    puts e.full_message if @debug =~ /true/i
+  rescue Interrupt
+    set_default_console
+    puts ""
   rescue Exception => e
     puts "[x] ".red + "Unhandled exception!"
     puts e.full_message
@@ -448,6 +547,8 @@ begin
     password:      opts[:pass],
     ansi:          true,  # enable ANSI_NULLS and ANSI_WARNINGS to avoid error
     # after_connect: SET_MSSQL_DEFAULTS,
+    connect_timeout: 30,
+    textsize:        1073741824, #(1GB)
     log_connection_info: true
   }
 
@@ -456,17 +557,10 @@ begin
   puts "[+] ".green + "Connected to '#{db_conn[:host]}:#{db_conn[:port]}'."
   puts @commands.run_command('help')
 
-  MAIN = %w[
-    help info dbs tables columns query links query-link exec cat mkdir
-    get-xpcmdshell, enable-xpcmdshell disable-xpcmdshell whoami
-    logons sessions db-admins enum-users enum-domain-groups
-    verbose debug 
-    exit
-  ].sort
-  comp = proc { |s| MAIN.grep(/^#{Regexp.escape(s)}/i) }
-  Readline.completion_proc = comp
 
-  trap('INT', 'SIG_IGN')
+  set_default_console
+
+  # trap('INT', 'DEFAULT')
   while true
     command =  Readline.readline('SQL -> '.bold, true)
     @commands.run_command(command)
@@ -475,6 +569,9 @@ begin
 rescue Sequel::DatabaseConnectionError => e
   puts "[x] ".red + "Could not connect to '#{db_conn[:host]}:#{db_conn[:port]}'."
   puts e.message
+rescue Interrupt
+  puts "See you l8er ;)".bold
 rescue Exception => e 
   puts "[x] ".red + e.full_message.to_s
 end
+
