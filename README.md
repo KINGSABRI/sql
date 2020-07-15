@@ -13,8 +13,11 @@ a console-based tool to connect to MSSQL server (loaded with pre-built queries) 
 - Enumerates databases tables and columns 
 - Enables and/or disables `xp_cmdshell` 
 - Executes system commands
+- Read file content
+- Create directory and subdirectory recursively 
+- Download files from MSSQL server system to local system
 - Crawls database links
-- Command autocomplete 
+- Command autocompletion
 - Easy to add new commands
 - verbose mode prints background SQL queries
 - debug mode prints ruby hashes from SQL queries result
@@ -60,6 +63,8 @@ tables              tables <DB_Name> - list tables for database.
 columns             columns <Table_Name> - list columns from table.
 exec                exec <CMD> - Execute Windows commands using xp_cmdshell.
 cat                 cat <FILE> - Read file from disk. (full path must given)
+mkdir               mkdir <DIR> - Create directories and subdirectories (acts like mkdir -p). (full path must given)
+download            download <FILE> - Download files from MSSQL server system. (full path must given)
 enable-xpcmdshell   enable-xpcmdshell - enable xp_cmdshell on MSSQL.
 disable-xpcmdshell  disable-xpcmdshell - disable xp_cmdshell on MSSQL.
 links               links - crawl MSSQL links.
