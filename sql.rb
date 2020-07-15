@@ -305,6 +305,30 @@ on      perm.grantee_principal_id = princ.principal_id
     end
   end
 
+  def cmd_download(file_path)
+    if file_path.nil? || file_path.empty?
+      puts "[!] ".yellow + "File name missing (full path required)"
+      return 
+    end
+    file = parse_path(file_path)
+
+    stored = create_readfile_procedure
+    _ensure = -> {
+      puts "[+] ".green + "Cleaning-up created stored procedure '#{stored[:procedure]}' content"
+      cmd_query("DROP PROCEDURE IF EXISTS #{stored[:procedure]}", print: false) # check if dropped: query IF OBJECT_ID('PROCEDURENAME', 'P') IS NULL SELECT @@servername
+    }
+    query = <<~SQLQUERY
+      DECLARE @t VARCHAR(MAX) 
+      EXEC #{stored[:procedure]} '#{file[:full_path]}', @t output 
+      SELECT @t AS [BulkColumn] 
+    SQLQUERY
+    puts "[+] ".green.bold + "Downloading file '#{file_path}' content:"
+    bulkcontent = cmd_query(query, {print: false, callback: _ensure})
+    if bulkcontent
+      File.write(file[:name], bulkcontent.first[:bulkcolumn].to_s)
+    end
+  end
+
   # https://www.mytecbits.com/microsoft/sql-server/escape-special-characters-using-string_escape
   # FIXME
   def cmd_upload(val=nil)
@@ -338,10 +362,6 @@ on      perm.grantee_principal_id = princ.principal_id
     SQLQUERY
     # puts "[+] ".green.bold + "Writing the conent to '#{parse_path(dst_file)}':"
     cmd_query(query, {print: false, callback: make_sure})
-  end
-
-  def cmd_download(file_path=nil)
-    puts "TBD"
   end
 
   # def cmd_ls(path='.')
@@ -418,6 +438,7 @@ on      perm.grantee_principal_id = princ.principal_id
     puts "exec".ljust(20," ")                 + "exec <CMD> - Execute Windows commands using xp_cmdshell."
     puts "cat".ljust(20," ")                  + "cat <FILE> - Read file from disk. (full path must given)"
     puts "mkdir".ljust(20," ")                + "mkdir <DIR> - Create directories and subdirectories (acts like mkdir -p). (full path must given)"
+    puts "download".ljust(20," ")             + "download <FILE> - Download files from MSSQL server system. (full path must given)"
     puts "enable-xpcmdshell".ljust(20," ")    + "enable-xpcmdshell - enable xp_cmdshell on MSSQL."
     puts "disable-xpcmdshell".ljust(20," ")   + "disable-xpcmdshell - disable xp_cmdshell on MSSQL."
     puts "links".ljust(20," ")                + "links - crawl MSSQL links."
@@ -547,7 +568,7 @@ begin
     password:      opts[:pass],
     ansi:          true,  # enable ANSI_NULLS and ANSI_WARNINGS to avoid error
     # after_connect: SET_MSSQL_DEFAULTS,
-    connect_timeout: 30,
+    # connect_timeout: 60,
     textsize:        1073741824, #(1GB)
     log_connection_info: true
   }
