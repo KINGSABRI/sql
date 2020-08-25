@@ -24,8 +24,14 @@ a console-based tool to connect to MSSQL server (loaded with pre-built queries) 
 
 
 ## Requirements
+
+Install tiny_tds dependency 
 ```
-gem install sequel terminal-table pry
+apt-get install freetds-dev
+```
+
+```
+gem install sequel tiny_tds terminal-table pry
 ```
 
 ## Usage
