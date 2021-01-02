@@ -11,9 +11,11 @@ a console-based tool to connect to MSSQL server (loaded with pre-built queries) 
 - Enumerates connected servers
 - Enumerates exist databases
 - Enumerates databases tables and columns 
+- Enumerates impersontable users
 - Enables and/or disables `xp_cmdshell` 
 - Executes system commands
 - Tree list for directories contents and UNC for capturing NTLMv2 hash or NTLM-relay
+- Impersonates user
 - Read file content
 - Create directory and subdirectory recursively 
 - Download files from MSSQL server system to local system
@@ -72,6 +74,9 @@ cat                 cat <FILE> - Read file from disk. (full path must given)
 mkdir               mkdir <DIR> - Create directories and subdirectories (acts like mkdir -p). (full path must given)
 dirtree             dirtree <UNC> - Execute xp_dirtree to list local or remote(UNC) system's files & directories. UNC path can be used to capture NTLMv2 hash or NTLM-relay.
 download            download <FILE> - Download files from MSSQL server system. (full path must given)
+--[ DB & SQL Service ]---------
+impersonate-login   impersonate-login <USER> - impersonate login user
+impersonate-user    impersonate-login <USER> <DB> - impersonate database user (default: user='dbo', db='msdb')
 enable-xpcmdshell   enable-xpcmdshell - enable xp_cmdshell on MSSQL.
 disable-xpcmdshell  disable-xpcmdshell - disable xp_cmdshell on MSSQL.
 --[ Enumuration ]-------------
@@ -80,6 +85,7 @@ whoami              whoami - retrieve current user informaiton.
 db-admins           db-admins - retrieve sysadmins.
 logons              logons - retrieve logged-on users.
 sessions            sessions - retrieve sessions (includes usernames and hostnames).
+enum-users          enum-users [NUM=10] - retrieve database users by id (default: first 0-10).
 enum-domain-groups  enum-domain-groups [DOMAIN]- retrieve domain groups.
 enum-impersonation  enum-impersonation - enumerate impersonationable users.
 dbs                 dbs - list databases.
