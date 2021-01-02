@@ -13,6 +13,7 @@ a console-based tool to connect to MSSQL server (loaded with pre-built queries) 
 - Enumerates databases tables and columns 
 - Enables and/or disables `xp_cmdshell` 
 - Executes system commands
+- Tree list for directories contents and UNC for capturing NTLMv2 hash or NTLM-relay
 - Read file content
 - Create directory and subdirectory recursively 
 - Download files from MSSQL server system to local system
@@ -53,32 +54,38 @@ Usage: sql.rb [options]
 ```
 $ ruby sql.rb --host MSSQL-SERVER -P 1433 -u DOMAIN\\USER -p PASSWORD
 [+] Connected to '127.0.0.1:1433'.
+¡] run 'help' to list avilable commands.
+SQL -> help 
 
 Command             Description
 -------             -----------
+--[ Main ]---------------------
 query               query <QUERY> - send raw query to the database.
 query-link          query-link <LINK> <QUERY> - send raw query to the database.
+verbose             verbose [true | false] - show queries behind built-in commands.
+debug               debug [true | false] - show queries values behind executed queries.
+help                Show this screen
+exit                exit the console
+--[ System ]-------------------
+exec                exec <CMD> - Execute Windows commands using xp_cmdshell.
+cat                 cat <FILE> - Read file from disk. (full path must given)
+mkdir               mkdir <DIR> - Create directories and subdirectories (acts like mkdir -p). (full path must given)
+dirtree             dirtree <UNC> - Execute xp_dirtree to list local or remote(UNC) system's files & directories. UNC path can be used to capture NTLMv2 hash or NTLM-relay.
+download            download <FILE> - Download files from MSSQL server system. (full path must given)
+enable-xpcmdshell   enable-xpcmdshell - enable xp_cmdshell on MSSQL.
+disable-xpcmdshell  disable-xpcmdshell - disable xp_cmdshell on MSSQL.
+--[ Enumuration ]-------------
 info                info - retrieve server information.
 whoami              whoami - retrieve current user informaiton.
 db-admins           db-admins - retrieve sysadmins.
 logons              logons - retrieve logged-on users.
 sessions            sessions - retrieve sessions (includes usernames and hostnames).
 enum-domain-groups  enum-domain-groups [DOMAIN]- retrieve domain groups.
+enum-impersonation  enum-impersonation - enumerate impersonationable users.
 dbs                 dbs - list databases.
 tables              tables <DB_Name> - list tables for database.
 columns             columns <Table_Name> - list columns from table.
-exec                exec <CMD> - Execute Windows commands using xp_cmdshell.
-cat                 cat <FILE> - Read file from disk. (full path must given)
-mkdir               mkdir <DIR> - Create directories and subdirectories (acts like mkdir -p). (full path must given)
-download            download <FILE> - Download files from MSSQL server system. (full path must given)
-enable-xpcmdshell   enable-xpcmdshell - enable xp_cmdshell on MSSQL.
-disable-xpcmdshell  disable-xpcmdshell - disable xp_cmdshell on MSSQL.
 links               links - crawl MSSQL links.
-verbose             verbose [true | false] - show queries behind built-in commands.
-debug               debug [true | false] - show queries values behind executed queries.
-help                Show this screen
-exit                exit the console
-
 
 SQL -> 
 ```
